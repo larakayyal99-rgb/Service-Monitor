@@ -15,8 +15,11 @@ A 404 means the server answered but the requested page was not found. A connecti
 
 Python 3.10 or newer is required. No extra packages are needed.
 
-Open a terminal in the project folder and start the example service:
+First, open a terminal in the extracted project folder—the folder containing `monitor.py`, `demo`, and `tests`.
 
+If your terminal opens in your home folder, use `cd` to navigate to the project folder. Its location depends on where you saved it.
+
+Repeat this step for the second terminal before starting the monitor.
 ```bash
 python3 -m http.server 8000 --bind 127.0.0.1 --directory demo
 ```
