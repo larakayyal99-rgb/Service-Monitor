@@ -70,4 +70,3 @@ This is a single-process learning tool, not production monitoring. Timing measur
 
 Tested on Ubuntu through WSL with Python 3.14.4. Manual checks covered a healthy service, a stopped server, recovery after restart, and a missing page. All four automated tests passed. See [Lab results](LAB-NOTES.md) for the observations.
 
-The code was prepared with AI assistance; I ran the lab and verified these results on my own machine.
