@@ -15,7 +15,7 @@ A 404 means the server answered but the requested page was not found. A connecti
 
 Python 3.10 or newer is required. No extra packages are needed.
 
-First, open a terminal in the extracted project folder—the folder containing `monitor.py`, `demo`, and `tests`.
+First, open a terminal in the extracted project folder, the folder containing `monitor.py`, `demo`, and `tests`.
 
 If your terminal opens in your home folder, use `cd` to navigate to the project folder. Its location depends on where you saved it.
 
