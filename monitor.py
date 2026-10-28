@@ -1,86 +1,66 @@
-"""Check a local HTTP service and save each result to CSV."""
-
-import argparse
 import csv
-from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import time
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
-from urllib.request import urlopen
+import socket
+import tempfile
+import threading
+import unittest
+
+from monitor import check_service, save_result
 
 
-def check_service(url, timeout=3):
-    started = time.perf_counter()
-    result = {
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "url": url,
-        "status": "DOWN",
-        "http_code": "",
-        "response_ms": "",
-        "error": "",
-    }
-    try:
-        with urlopen(url, timeout=timeout) as response:
-            result["http_code"] = response.status
-            result["status"] = "UP" if 200 <= response.status < 300 else "DOWN"
-            if result["status"] == "DOWN":
-                result["error"] = f"Unexpected HTTP status: {response.status}"
-    except HTTPError as error:
-        # A server can respond while the requested page is unhealthy.
-        result["http_code"] = error.code
-        result["error"] = f"HTTP {error.code}"
-        error.close()
-    except (URLError, TimeoutError, OSError) as error:
-        result["error"] = str(getattr(error, "reason", error))
-    result["response_ms"] = round((time.perf_counter() - started) * 1000, 2)
-    return result
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200 if self.path == "/" else 404)
+        self.end_headers()
+        self.wfile.write(b"Local test service")
+
+    def log_message(self, *args):
+        pass
 
 
-def save_result(result, filename):
-    path = Path(filename)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    needs_header = not path.exists() or path.stat().st_size == 0
-    with path.open("a", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=list(result))
-        if needs_header:
-            writer.writeheader()
-        writer.writerow(result)
+class MonitorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.url = f"http://127.0.0.1:{cls.server.server_port}"
 
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join()
 
-def positive_number(value):
-    import math
-    number = float(value)
-    if not math.isfinite(number) or number <= 0:
-        raise argparse.ArgumentTypeError("Use a finite number greater than zero.")
-    return number
+    def test_healthy_service(self):
+        result = check_service(self.url)
+        self.assertEqual((result["status"], result["http_code"]), ("UP", 200))
+        self.assertEqual(result["error"], "")
 
+    def test_missing_page_is_down(self):
+        result = check_service(self.url + "/missing")
+        self.assertEqual((result["status"], result["http_code"]), ("DOWN", 404))
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="http://127.0.0.1:8000/")
-    parser.add_argument("--interval", type=positive_number, default=5)
-    parser.add_argument("--timeout", type=positive_number, default=3)
-    parser.add_argument("--log", default="results/checks.csv")
-    parser.add_argument("--once", action="store_true", help="Check once, then exit.")
-    args = parser.parse_args()
-    parsed = urlsplit(args.url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        parser.error("Use an http:// or https:// URL with a hostname.")
-    try:
-        while True:
-            result = check_service(args.url, args.timeout)
-            save_result(result, args.log)
-            detail = result["error"] or f"HTTP {result['http_code']}"
-            print(f"{result['timestamp']} {result['status']} {detail} "
-                  f"({result['response_ms']} ms)", flush=True)
-            if args.once:
-                return 0 if result["status"] == "UP" else 1
-            time.sleep(args.interval)
-    except KeyboardInterrupt:
-        print("\nMonitor stopped.")
-        return 0
+    def test_unavailable_service(self):
+        # Reserve a port without listening, so a TCP connection is refused.
+        with socket.socket() as reserved:
+            reserved.bind(("127.0.0.1", 0))
+            result = check_service(f"http://127.0.0.1:{reserved.getsockname()[1]}")
+        self.assertEqual(result["status"], "DOWN")
+        self.assertEqual(result["http_code"], "")
+        self.assertTrue(result["error"])
+
+    def test_csv_appends_without_repeating_header(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "checks.csv"
+            for _ in range(2):
+                save_result(check_service(self.url), path)
+            with path.open(newline="") as file:
+                rows = list(csv.DictReader(file))
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(all(row["status"] == "UP" for row in rows))
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    unittest.main()
